@@ -30,9 +30,10 @@ module.exports = {
     trustedTypes: true,
 
     // Scheduler profiling
-    SharedArrayBuffer: true,
     Int32Array: true,
     ArrayBuffer: true,
+
+    TaskController: true,
 
     // Flight
     Uint8Array: true,
@@ -41,6 +42,9 @@ module.exports = {
     // Flight Webpack
     __webpack_chunk_load__: true,
     __webpack_require__: true,
+
+    // jest
+    jest: true,
   },
   parserOptions: {
     ecmaVersion: 5,

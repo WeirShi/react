@@ -17,7 +17,7 @@ function App() {
 
 beforeEach(() => {
   jest.resetModules();
-  jest.unmock('scheduler');
+  jest.mock('scheduler', () => require('scheduler/unstable_no_dom'));
   React = require('react');
   ReactDOM = require('react-dom');
   ReactFeatureFlags = require('shared/ReactFeatureFlags');
@@ -32,7 +32,7 @@ it('should warn in legacy mode', () => {
   expect(() => {
     ReactDOM.render(<App />, document.createElement('div'));
   }).toErrorDev(
-    ['Starting from React v17, the "scheduler" module will need to be mocked'],
+    ['Starting from React v18, the "scheduler" module will need to be mocked'],
     {withoutStack: true},
   );
   // does not warn twice

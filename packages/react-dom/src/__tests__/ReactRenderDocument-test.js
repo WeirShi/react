@@ -39,7 +39,7 @@ describe('rendering React components at document', () => {
         callback,
       ).toWarnDev(
         'render(): Calling ReactDOM.render() to hydrate server-rendered markup ' +
-          'will stop working in React v17. Replace the ReactDOM.render() call ' +
+          'will stop working in React v18. Replace the ReactDOM.render() call ' +
           'with ReactDOM.hydrate() if you want React to attach to the server HTML.',
         {withoutStack: true},
       );
@@ -201,7 +201,7 @@ describe('rendering React components at document', () => {
           ReactDOM.render(<Component text="Hello world" />, testDocument),
         ).toWarnDev(
           'render(): Calling ReactDOM.render() to hydrate server-rendered markup ' +
-            'will stop working in React v17. Replace the ReactDOM.render() call ' +
+            'will stop working in React v18. Replace the ReactDOM.render() call ' +
             'with ReactDOM.hydrate() if you want React to attach to the server HTML.',
           {withoutStack: true},
         );
@@ -368,10 +368,29 @@ describe('rendering React components at document', () => {
       expect(testDocument.body.innerHTML).toBe('Hello world');
     });
 
-    it('renders over an existing text child without throwing', () => {
+    it('cannot render over an existing text child at the root', () => {
       const container = document.createElement('div');
       container.textContent = 'potato';
       expect(() => ReactDOM.hydrate(<div>parsnip</div>, container)).toErrorDev(
+        'Expected server HTML to contain a matching <div> in <div>.',
+      );
+      // This creates an unfortunate double text case.
+      expect(container.textContent).toBe('potatoparsnip');
+    });
+
+    it('renders over an existing nested text child without throwing', () => {
+      const container = document.createElement('div');
+      const wrapper = document.createElement('div');
+      wrapper.textContent = 'potato';
+      container.appendChild(wrapper);
+      expect(() =>
+        ReactDOM.hydrate(
+          <div>
+            <div>parsnip</div>
+          </div>,
+          container,
+        ),
+      ).toErrorDev(
         'Expected server HTML to contain a matching <div> in <div>.',
       );
       expect(container.textContent).toBe('parsnip');

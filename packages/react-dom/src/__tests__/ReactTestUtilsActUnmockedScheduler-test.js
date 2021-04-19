@@ -33,7 +33,9 @@ function unmount(dom) {
 
 beforeEach(() => {
   jest.resetModules();
-  jest.unmock('scheduler');
+  jest.mock('scheduler', () =>
+    require.requireActual('scheduler/unstable_no_dom'),
+  );
   yields = [];
   React = require('react');
   ReactDOM = require('react-dom');
@@ -100,7 +102,7 @@ it('flushes effects on every call', () => {
   expect(button.innerHTML).toEqual('5');
 });
 
-it("should keep flushing effects until the're done", () => {
+it("should keep flushing effects until they're done", () => {
   function App() {
     const [ctr, setCtr] = React.useState(0);
     React.useEffect(() => {

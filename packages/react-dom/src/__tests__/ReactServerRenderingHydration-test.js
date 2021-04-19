@@ -83,7 +83,7 @@ describe('ReactDOMServerHydration', () => {
         instance = ReactDOM.render(<TestComponent name="x" />, element);
       }).toWarnDev(
         'render(): Calling ReactDOM.render() to hydrate server-rendered markup ' +
-          'will stop working in React v17. Replace the ReactDOM.render() call ' +
+          'will stop working in React v18. Replace the ReactDOM.render() call ' +
           'with ReactDOM.hydrate() if you want React to attach to the server HTML.',
         {withoutStack: true},
       );
@@ -488,6 +488,7 @@ describe('ReactDOMServerHydration', () => {
     jest.runAllTimers();
     await Promise.resolve();
     Scheduler.unstable_flushAll();
+    await null;
     expect(element.textContent).toBe('Hello world');
   });
 
@@ -509,26 +510,47 @@ describe('ReactDOMServerHydration', () => {
 
   it('Suspense + hydration in legacy mode', () => {
     const element = document.createElement('div');
-    element.innerHTML = '<div>Hello World</div>';
-    const div = element.firstChild;
+    element.innerHTML = '<div><div>Hello World</div></div>';
+    const div = element.firstChild.firstChild;
     const ref = React.createRef();
     expect(() =>
       ReactDOM.hydrate(
-        <React.Suspense fallback={null}>
-          <div ref={ref}>Hello World</div>
-        </React.Suspense>,
+        <div>
+          <React.Suspense fallback={null}>
+            <div ref={ref}>Hello World</div>
+          </React.Suspense>
+        </div>,
         element,
       ),
     ).toErrorDev(
       'Warning: Did not expect server HTML to contain a <div> in <div>.',
-      {withoutStack: true},
     );
 
     // The content should've been client rendered and replaced the
     // existing div.
     expect(ref.current).not.toBe(div);
     // The HTML should be the same though.
-    expect(element.innerHTML).toBe('<div>Hello World</div>');
+    expect(element.innerHTML).toBe('<div><div>Hello World</div></div>');
+  });
+
+  it('Suspense + hydration in legacy mode (at root)', () => {
+    const element = document.createElement('div');
+    element.innerHTML = '<div>Hello World</div>';
+    const div = element.firstChild;
+    const ref = React.createRef();
+    ReactDOM.hydrate(
+      <React.Suspense fallback={null}>
+        <div ref={ref}>Hello World</div>
+      </React.Suspense>,
+      element,
+    );
+
+    // The content should've been client rendered.
+    expect(ref.current).not.toBe(div);
+    // Unfortunately, since we don't delete the tail at the root, a duplicate will remain.
+    expect(element.innerHTML).toBe(
+      '<div>Hello World</div><div>Hello World</div>',
+    );
   });
 
   it('Suspense + hydration in legacy mode with no fallback', () => {

@@ -24,6 +24,19 @@ describe('ReactIncremental', () => {
     PropTypes = require('prop-types');
   });
 
+  // Note: This is based on a similar component we use in www. We can delete
+  // once the extra div wrapper is no longer necessary.
+  function LegacyHiddenDiv({children, mode}) {
+    return (
+      <div hidden={mode === 'hidden'}>
+        <React.unstable_LegacyHidden
+          mode={mode === 'hidden' ? 'unstable-defer-without-hiding' : mode}>
+          {children}
+        </React.unstable_LegacyHidden>
+      </div>
+    );
+  }
+
   it('should render a simple component', () => {
     function Bar() {
       return <div>Hello World</div>;
@@ -37,6 +50,7 @@ describe('ReactIncremental', () => {
     expect(Scheduler).toFlushWithoutYielding();
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('should render a simple component, in steps if needed', () => {
     function Bar() {
       Scheduler.unstable_yieldValue('Bar');
@@ -52,7 +66,17 @@ describe('ReactIncremental', () => {
       return [<Bar key="a" isBar={true} />, <Bar key="b" isBar={true} />];
     }
 
-    ReactNoop.render(<Foo />, () => Scheduler.unstable_yieldValue('callback'));
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo />, () =>
+          Scheduler.unstable_yieldValue('callback'),
+        );
+      });
+    } else {
+      ReactNoop.render(<Foo />, () =>
+        Scheduler.unstable_yieldValue('callback'),
+      );
+    }
     // Do one step of work.
     expect(ReactNoop.flushNextYield()).toEqual(['Foo']);
 
@@ -119,6 +143,7 @@ describe('ReactIncremental', () => {
     ]);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('can cancel partially rendered work and restart', () => {
     function Bar(props) {
       Scheduler.unstable_yieldValue('Bar');
@@ -139,13 +164,26 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<Foo text="foo" />);
     expect(Scheduler).toFlushAndYield(['Foo', 'Bar', 'Bar']);
 
-    ReactNoop.render(<Foo text="bar" />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo text="bar" />);
+      });
+    } else {
+      ReactNoop.render(<Foo text="bar" />);
+    }
     // Flush part of the work
     expect(Scheduler).toFlushAndYieldThrough(['Foo', 'Bar']);
 
     // This will abort the previous work and restart
     ReactNoop.flushSync(() => ReactNoop.render(null));
-    ReactNoop.render(<Foo text="baz" />);
+
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo text="baz" />);
+      });
+    } else {
+      ReactNoop.render(<Foo text="baz" />);
+    }
 
     // Flush part of the new work
     expect(Scheduler).toFlushAndYieldThrough(['Foo', 'Bar']);
@@ -154,6 +192,7 @@ describe('ReactIncremental', () => {
     expect(Scheduler).toFlushAndYield(['Bar']);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('should call callbacks even if updates are aborted', () => {
     let inst;
 
@@ -179,26 +218,50 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<Foo />);
     expect(Scheduler).toFlushWithoutYielding();
 
-    inst.setState(
-      () => {
-        Scheduler.unstable_yieldValue('setState1');
-        return {text: 'bar'};
-      },
-      () => Scheduler.unstable_yieldValue('callback1'),
-    );
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        inst.setState(
+          () => {
+            Scheduler.unstable_yieldValue('setState1');
+            return {text: 'bar'};
+          },
+          () => Scheduler.unstable_yieldValue('callback1'),
+        );
+      });
+    } else {
+      inst.setState(
+        () => {
+          Scheduler.unstable_yieldValue('setState1');
+          return {text: 'bar'};
+        },
+        () => Scheduler.unstable_yieldValue('callback1'),
+      );
+    }
 
     // Flush part of the work
     expect(Scheduler).toFlushAndYieldThrough(['setState1']);
 
     // This will abort the previous work and restart
     ReactNoop.flushSync(() => ReactNoop.render(<Foo />));
-    inst.setState(
-      () => {
-        Scheduler.unstable_yieldValue('setState2');
-        return {text2: 'baz'};
-      },
-      () => Scheduler.unstable_yieldValue('callback2'),
-    );
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        inst.setState(
+          () => {
+            Scheduler.unstable_yieldValue('setState2');
+            return {text2: 'baz'};
+          },
+          () => Scheduler.unstable_yieldValue('callback2'),
+        );
+      });
+    } else {
+      inst.setState(
+        () => {
+          Scheduler.unstable_yieldValue('setState2');
+          return {text2: 'baz'};
+        },
+        () => Scheduler.unstable_yieldValue('callback2'),
+      );
+    }
 
     // Flush the rest of the work which now includes the low priority
     expect(Scheduler).toFlushAndYield([
@@ -210,6 +273,7 @@ describe('ReactIncremental', () => {
     expect(inst.state).toEqual({text: 'bar', text2: 'baz'});
   });
 
+  // @gate experimental
   it('can deprioritize unfinished work and resume it later', () => {
     function Bar(props) {
       Scheduler.unstable_yieldValue('Bar');
@@ -226,13 +290,13 @@ describe('ReactIncremental', () => {
       return (
         <div>
           <Bar>{props.text}</Bar>
-          <section hidden={true}>
+          <LegacyHiddenDiv mode="hidden">
             <Middle>{props.text}</Middle>
-          </section>
+          </LegacyHiddenDiv>
           <Bar>{props.text}</Bar>
-          <footer hidden={true}>
+          <LegacyHiddenDiv mode="hidden">
             <Middle>Footer</Middle>
-          </footer>
+          </LegacyHiddenDiv>
         </div>
       );
     }
@@ -255,6 +319,7 @@ describe('ReactIncremental', () => {
     expect(Scheduler).toFlushAndYield(['Middle', 'Middle']);
   });
 
+  // @gate experimental
   it('can deprioritize a tree from without dropping work', () => {
     function Bar(props) {
       Scheduler.unstable_yieldValue('Bar');
@@ -271,13 +336,13 @@ describe('ReactIncremental', () => {
       return (
         <div>
           <Bar>{props.text}</Bar>
-          <section hidden={true}>
+          <LegacyHiddenDiv mode="hidden">
             <Middle>{props.text}</Middle>
-          </section>
+          </LegacyHiddenDiv>
           <Bar>{props.text}</Bar>
-          <footer hidden={true}>
+          <LegacyHiddenDiv mode="hidden">
             <Middle>Footer</Middle>
-          </footer>
+          </LegacyHiddenDiv>
         </div>
       );
     }
@@ -1699,6 +1764,7 @@ describe('ReactIncremental', () => {
     expect(instance.state.n).toEqual(3);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('merges and masks context', () => {
     class Intl extends React.Component {
       static childContextTypes = {
@@ -1823,15 +1889,27 @@ describe('ReactIncremental', () => {
       'ShowLocale {"locale":"de"}',
       'ShowBoth {"locale":"de"}',
     ]);
-
-    ReactNoop.render(
-      <Intl locale="sv">
-        <ShowLocale />
-        <div>
-          <ShowBoth />
-        </div>
-      </Intl>,
-    );
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(
+          <Intl locale="sv">
+            <ShowLocale />
+            <div>
+              <ShowBoth />
+            </div>
+          </Intl>,
+        );
+      });
+    } else {
+      ReactNoop.render(
+        <Intl locale="sv">
+          <ShowLocale />
+          <div>
+            <ShowBoth />
+          </div>
+        </Intl>,
+      );
+    }
     expect(Scheduler).toFlushAndYieldThrough(['Intl {}']);
 
     ReactNoop.render(
@@ -1950,6 +2028,7 @@ describe('ReactIncremental', () => {
     });
   }
 
+  // @gate experimental
   it('provides context when reusing work', () => {
     class Intl extends React.Component {
       static childContextTypes = {
@@ -1978,18 +2057,35 @@ describe('ReactIncremental', () => {
       }
     }
 
-    ReactNoop.render(
-      <Intl locale="fr">
-        <ShowLocale />
-        <div hidden="true">
-          <ShowLocale />
-          <Intl locale="ru">
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(
+          <Intl locale="fr">
             <ShowLocale />
-          </Intl>
-        </div>
-        <ShowLocale />
-      </Intl>,
-    );
+            <LegacyHiddenDiv mode="hidden">
+              <ShowLocale />
+              <Intl locale="ru">
+                <ShowLocale />
+              </Intl>
+            </LegacyHiddenDiv>
+            <ShowLocale />
+          </Intl>,
+        );
+      });
+    } else {
+      ReactNoop.render(
+        <Intl locale="fr">
+          <ShowLocale />
+          <LegacyHiddenDiv mode="hidden">
+            <ShowLocale />
+            <Intl locale="ru">
+              <ShowLocale />
+            </Intl>
+          </LegacyHiddenDiv>
+          <ShowLocale />
+        </Intl>,
+      );
+    }
     expect(Scheduler).toFlushAndYieldThrough([
       'Intl {}',
       'ShowLocale {"locale":"fr"}',
@@ -2732,6 +2828,7 @@ describe('ReactIncremental', () => {
     expect(Scheduler).toFlushAndYield(['count:1, name:not brian']);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('does not interrupt for update at same priority', () => {
     function Parent(props) {
       Scheduler.unstable_yieldValue('Parent: ' + props.step);
@@ -2743,7 +2840,13 @@ describe('ReactIncremental', () => {
       return null;
     }
 
-    ReactNoop.render(<Parent step={1} />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Parent step={1} />);
+      });
+    } else {
+      ReactNoop.render(<Parent step={1} />);
+    }
     expect(Scheduler).toFlushAndYieldThrough(['Parent: 1']);
 
     // Interrupt at same priority
@@ -2752,6 +2855,7 @@ describe('ReactIncremental', () => {
     expect(Scheduler).toFlushAndYield(['Child: 1', 'Parent: 2', 'Child: 2']);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('does not interrupt for update at lower priority', () => {
     function Parent(props) {
       Scheduler.unstable_yieldValue('Parent: ' + props.step);
@@ -2763,7 +2867,13 @@ describe('ReactIncremental', () => {
       return null;
     }
 
-    ReactNoop.render(<Parent step={1} />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Parent step={1} />);
+      });
+    } else {
+      ReactNoop.render(<Parent step={1} />);
+    }
     expect(Scheduler).toFlushAndYieldThrough(['Parent: 1']);
 
     // Interrupt at lower priority
@@ -2773,6 +2883,7 @@ describe('ReactIncremental', () => {
     expect(Scheduler).toFlushAndYield(['Child: 1', 'Parent: 2', 'Child: 2']);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('does interrupt for update at higher priority', () => {
     function Parent(props) {
       Scheduler.unstable_yieldValue('Parent: ' + props.step);
@@ -2784,7 +2895,13 @@ describe('ReactIncremental', () => {
       return null;
     }
 
-    ReactNoop.render(<Parent step={1} />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Parent step={1} />);
+      });
+    } else {
+      ReactNoop.render(<Parent step={1} />);
+    }
     expect(Scheduler).toFlushAndYieldThrough(['Parent: 1']);
 
     // Interrupt at higher priority

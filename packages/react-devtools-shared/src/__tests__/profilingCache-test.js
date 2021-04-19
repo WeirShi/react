@@ -478,7 +478,7 @@ describe('ProfilingCache', () => {
     expect(commitData).not.toBeNull();
   });
 
-  it('should calculate self duration correctly for suspended views', async done => {
+  it('should calculate self duration correctly for suspended views', async () => {
     let data;
     const getData = () => {
       if (data) {
@@ -536,8 +536,6 @@ describe('ProfilingCache', () => {
     }
 
     expect(allCommitData).toHaveLength(2);
-
-    done();
   });
 
   it('should collect data for each rendered fiber', () => {
@@ -695,5 +693,114 @@ describe('ProfilingCache', () => {
         <Validator previousInteractions={interactions} rootID={rootID} />,
       ),
     );
+  });
+
+  it('should handle unexpectedly shallow suspense trees', () => {
+    const container = document.createElement('div');
+
+    utils.act(() => store.profilerStore.startProfiling());
+    utils.act(() => ReactDOM.render(<React.Suspense />, container));
+    utils.act(() => store.profilerStore.stopProfiling());
+
+    function Validator({commitIndex, rootID}) {
+      const profilingDataForRoot = store.profilerStore.getDataForRoot(rootID);
+      expect(profilingDataForRoot).toMatchSnapshot('Empty Suspense node');
+      return null;
+    }
+
+    const rootID = store.roots[0];
+
+    utils.act(() => {
+      TestRenderer.create(<Validator commitIndex={0} rootID={rootID} />);
+    });
+  });
+
+  // See https://github.com/facebook/react/issues/18831
+  it('should not crash during route transitions with Suspense', () => {
+    const RouterContext = React.createContext();
+
+    function App() {
+      return (
+        <Router>
+          <Switch>
+            <Route path="/">
+              <Home />
+            </Route>
+            <Route path="/about">
+              <About />
+            </Route>
+          </Switch>
+        </Router>
+      );
+    }
+
+    const Home = () => {
+      return (
+        <React.Suspense>
+          <Link path="/about">Home</Link>
+        </React.Suspense>
+      );
+    };
+
+    const About = () => <div>About</div>;
+
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router/modules/Router.js
+    function Router({children}) {
+      const [path, setPath] = React.useState('/');
+      return (
+        <RouterContext.Provider value={{path, setPath}}>
+          {children}
+        </RouterContext.Provider>
+      );
+    }
+
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router/modules/Switch.js
+    function Switch({children}) {
+      return (
+        <RouterContext.Consumer>
+          {context => {
+            let element = null;
+            React.Children.forEach(children, child => {
+              if (context.path === child.props.path) {
+                element = child.props.children;
+              }
+            });
+            return element ? React.cloneElement(element) : null;
+          }}
+        </RouterContext.Consumer>
+      );
+    }
+
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router/modules/Route.js
+    function Route({children, path}) {
+      return null;
+    }
+
+    const linkRef = React.createRef();
+
+    // Mimics https://github.com/ReactTraining/react-router/blob/master/packages/react-router-dom/modules/Link.js
+    function Link({children, path}) {
+      return (
+        <RouterContext.Consumer>
+          {context => {
+            return (
+              <button ref={linkRef} onClick={() => context.setPath(path)}>
+                {children}
+              </button>
+            );
+          }}
+        </RouterContext.Consumer>
+      );
+    }
+
+    const {Simulate} = require('react-dom/test-utils');
+
+    const container = document.createElement('div');
+    utils.act(() => ReactDOM.render(<App />, container));
+    expect(container.textContent).toBe('Home');
+    utils.act(() => store.profilerStore.startProfiling());
+    utils.act(() => Simulate.click(linkRef.current));
+    utils.act(() => store.profilerStore.stopProfiling());
+    expect(container.textContent).toBe('About');
   });
 });

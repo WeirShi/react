@@ -14,7 +14,8 @@ import type {ReactProvider, ReactContext} from 'shared/ReactTypes';
 
 import * as React from 'react';
 import invariant from 'shared/invariant';
-import getComponentName from 'shared/getComponentName';
+import isArray from 'shared/isArray';
+import getComponentNameFromType from 'shared/getComponentNameFromType';
 import {describeUnknownElementTypeFrameInDEV} from 'shared/ReactComponentStackFrame';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
 import {
@@ -22,8 +23,6 @@ import {
   disableLegacyContext,
   disableModulePatternComponents,
   enableSuspenseServerRenderer,
-  enableFundamentalAPI,
-  enableDeprecatedFlareAPI,
   enableScopeAPI,
 } from 'shared/ReactFeatureFlags';
 
@@ -40,8 +39,8 @@ import {
   REACT_CONTEXT_TYPE,
   REACT_LAZY_TYPE,
   REACT_MEMO_TYPE,
-  REACT_FUNDAMENTAL_TYPE,
   REACT_SCOPE_TYPE,
+  REACT_LEGACY_HIDDEN_TYPE,
 } from 'shared/ReactSymbols';
 
 import {
@@ -59,12 +58,13 @@ import escapeTextForBrowser from './escapeTextForBrowser';
 import {
   prepareToUseHooks,
   finishHooks,
+  resetHooksState,
   Dispatcher,
-  currentThreadID,
-  setCurrentThreadID,
+  currentPartialRenderer,
+  setCurrentPartialRenderer,
 } from './ReactPartialRendererHooks';
 import {
-  Namespaces,
+  HTML_NAMESPACE,
   getIntrinsicNamespace,
   getChildNamespace,
 } from '../shared/DOMNamespaces';
@@ -72,12 +72,17 @@ import {checkControlledValueProps} from '../shared/ReactControlledValuePropTypes
 import assertValidProps from '../shared/assertValidProps';
 import dangerousStyleValue from '../shared/dangerousStyleValue';
 import hyphenateStyleName from '../shared/hyphenateStyleName';
-import isCustomComponent from '../shared/isCustomComponent';
+import isCustomComponentFn from '../shared/isCustomComponent';
 import omittedCloseTags from '../shared/omittedCloseTags';
 import warnValidStyle from '../shared/warnValidStyle';
 import {validateProperties as validateARIAProperties} from '../shared/ReactDOMInvalidARIAHook';
 import {validateProperties as validateInputProperties} from '../shared/ReactDOMNullInputValuePropHook';
 import {validateProperties as validateUnknownProperties} from '../shared/ReactDOMUnknownPropertyHook';
+import hasOwnProperty from 'shared/hasOwnProperty';
+
+export type ServerOptions = {
+  identifierPrefix?: string,
+};
 
 // Based on reading the React.Children implementation. TODO: type this somewhere?
 type ReactNode = string | number | ReactElement;
@@ -109,7 +114,7 @@ if (__DEV__) {
   validatePropertiesInDevelopment = function(type, props) {
     validateARIAProperties(type, props);
     validateInputProperties(type, props);
-    validateUnknownProperties(type, props, /* canUseEventSystem */ false);
+    validateUnknownProperties(type, props, null);
   };
 
   describeStackFrame = function(element): string {
@@ -256,7 +261,7 @@ function warnNoop(
   if (__DEV__) {
     const constructor = publicInstance.constructor;
     const componentName =
-      (constructor && getComponentName(constructor)) || 'ReactClass';
+      (constructor && getComponentNameFromType(constructor)) || 'ReactClass';
     const warningKey = componentName + '.' + callerName;
     if (didWarnAboutNoopUpdateForComponent[warningKey]) {
       return;
@@ -337,7 +342,6 @@ function flattenOptionChildren(children: mixed): ?string {
   return content;
 }
 
-const hasOwnProperty = Object.prototype.hasOwnProperty;
 const STYLE = 'style';
 const RESERVED_PROPS = {
   children: null,
@@ -356,11 +360,10 @@ function createOpenTagMarkup(
 ): string {
   let ret = '<' + tagVerbatim;
 
+  const isCustomComponent = isCustomComponentFn(tagLowercase, props);
+
   for (const propKey in props) {
     if (!hasOwnProperty.call(props, propKey)) {
-      continue;
-    }
-    if (enableDeprecatedFlareAPI && propKey === 'DEPRECATED_flareListeners') {
       continue;
     }
     let propValue = props[propKey];
@@ -371,7 +374,7 @@ function createOpenTagMarkup(
       propValue = createMarkupForStyles(propValue);
     }
     let markup = null;
-    if (isCustomComponent(tagLowercase, props)) {
+    if (isCustomComponent) {
       if (!RESERVED_PROPS.hasOwnProperty(propKey)) {
         markup = createMarkupForCustomAttribute(propKey, propValue);
       }
@@ -402,7 +405,7 @@ function validateRenderResult(child, type) {
       '%s(...): Nothing was returned from render. This usually means a ' +
         'return statement is missing. Or, to render nothing, ' +
         'return null.',
-      getComponentName(type) || 'Component',
+      getComponentNameFromType(type) || 'Component',
     );
   }
 }
@@ -465,7 +468,8 @@ function resolve(
       if (typeof Component.getDerivedStateFromProps === 'function') {
         if (__DEV__) {
           if (inst.state === null || inst.state === undefined) {
-            const componentName = getComponentName(Component) || 'Unknown';
+            const componentName =
+              getComponentNameFromType(Component) || 'Unknown';
             if (!didWarnAboutUninitializedState[componentName]) {
               console.error(
                 '`%s` uses `getDerivedStateFromProps` but its initial state is ' +
@@ -489,7 +493,8 @@ function resolve(
 
         if (__DEV__) {
           if (partialState === undefined) {
-            const componentName = getComponentName(Component) || 'Unknown';
+            const componentName =
+              getComponentNameFromType(Component) || 'Unknown';
             if (!didWarnAboutUndefinedDerivedState[componentName]) {
               console.error(
                 '%s.getDerivedStateFromProps(): A valid state object (or null) must be returned. ' +
@@ -511,7 +516,8 @@ function resolve(
           Component.prototype &&
           typeof Component.prototype.render === 'function'
         ) {
-          const componentName = getComponentName(Component) || 'Unknown';
+          const componentName =
+            getComponentNameFromType(Component) || 'Unknown';
 
           if (!didWarnAboutBadClass[componentName]) {
             console.error(
@@ -533,7 +539,8 @@ function resolve(
         // Support for module components is deprecated and is removed behind a flag.
         // Whether or not it would crash later, we want to show a good message in DEV first.
         if (inst != null && inst.render != null) {
-          const componentName = getComponentName(Component) || 'Unknown';
+          const componentName =
+            getComponentNameFromType(Component) || 'Unknown';
           if (!didWarnAboutModulePatternComponent[componentName]) {
             console.error(
               'The <%s /> component appears to be a function component that returns a class instance. ' +
@@ -581,13 +588,14 @@ function resolve(
             warnAboutDeprecatedLifecycles &&
             inst.componentWillMount.__suppressDeprecationWarning !== true
           ) {
-            const componentName = getComponentName(Component) || 'Unknown';
+            const componentName =
+              getComponentNameFromType(Component) || 'Unknown';
 
             if (!didWarnAboutDeprecatedWillMount[componentName]) {
               console.warn(
                 // keep this warning in sync with ReactStrictModeWarning.js
                 'componentWillMount has been renamed, and is not recommended for use. ' +
-                  'See https://fb.me/react-unsafe-component-lifecycles for details.\n\n' +
+                  'See https://reactjs.org/link/unsafe-component-lifecycles for details.\n\n' +
                   '* Move code from componentWillMount to componentDidMount (preferred in most cases) ' +
                   'or the constructor.\n' +
                   '\nPlease update the following components: %s',
@@ -663,7 +671,7 @@ function resolve(
           console.error(
             '%s uses the legacy childContextTypes API which is no longer supported. ' +
               'Use React.createContext() instead.',
-            getComponentName(Component) || 'Unknown',
+            getComponentNameFromType(Component) || 'Unknown',
           );
         }
       }
@@ -676,7 +684,7 @@ function resolve(
             invariant(
               contextKey in childContextTypes,
               '%s.getChildContext(): key "%s" is not defined in childContextTypes.',
-              getComponentName(Component) || 'Unknown',
+              getComponentNameFromType(Component) || 'Unknown',
               contextKey,
             );
           }
@@ -685,7 +693,7 @@ function resolve(
             console.error(
               '%s.getChildContext(): childContextTypes must be defined in order to ' +
                 'use getChildContext().',
-              getComponentName(Component) || 'Unknown',
+              getComponentNameFromType(Component) || 'Unknown',
             );
           }
         }
@@ -726,14 +734,21 @@ class ReactDOMServerRenderer {
   contextValueStack: Array<any>;
   contextProviderStack: ?Array<ReactProvider<any>>; // DEV-only
 
-  constructor(children: mixed, makeStaticMarkup: boolean) {
+  uniqueID: number;
+  identifierPrefix: string;
+
+  constructor(
+    children: mixed,
+    makeStaticMarkup: boolean,
+    options?: ServerOptions,
+  ) {
     const flatChildren = flattenTopLevelChildren(children);
 
     const topFrame: Frame = {
       type: null,
       // Assume all trees start in the HTML namespace (not totally true, but
       // this is what we did historically)
-      domNamespace: Namespaces.html,
+      domNamespace: HTML_NAMESPACE,
       children: flatChildren,
       childIndex: 0,
       context: emptyObject,
@@ -754,6 +769,11 @@ class ReactDOMServerRenderer {
     this.contextIndex = -1;
     this.contextStack = [];
     this.contextValueStack = [];
+
+    // useOpaqueIdentifier ID
+    this.uniqueID = 0;
+    this.identifierPrefix = (options && options.identifierPrefix) || '';
+
     if (__DEV__) {
       this.contextProviderStack = [];
     }
@@ -837,8 +857,8 @@ class ReactDOMServerRenderer {
       return null;
     }
 
-    const prevThreadID = currentThreadID;
-    setCurrentThreadID(this.threadID);
+    const prevPartialRenderer = currentPartialRenderer;
+    setCurrentPartialRenderer(this);
     const prevDispatcher = ReactCurrentDispatcher.current;
     ReactCurrentDispatcher.current = Dispatcher;
     try {
@@ -935,7 +955,8 @@ class ReactDOMServerRenderer {
       return out[0];
     } finally {
       ReactCurrentDispatcher.current = prevDispatcher;
-      setCurrentThreadID(prevThreadID);
+      setCurrentPartialRenderer(prevPartialRenderer);
+      resetHooksState();
     }
   }
 
@@ -1003,6 +1024,14 @@ class ReactDOMServerRenderer {
       }
 
       switch (elementType) {
+        // TODO: LegacyHidden acts the same as a fragment. This only works
+        // because we currently assume that every instance of LegacyHidden is
+        // accompanied by a host component wrapper. In the hidden mode, the host
+        // component is given a `hidden` attribute, which ensures that the
+        // initial HTML is not visible. To support the use of LegacyHidden as a
+        // true fragment, without an extra DOM node, we would have to hide the
+        // initial HTML in some other way.
+        case REACT_LEGACY_HIDDEN_TYPE:
         case REACT_DEBUG_TRACING_MODE_TYPE:
         case REACT_STRICT_MODE_TYPE:
         case REACT_PROFILER_TYPE:
@@ -1078,6 +1107,31 @@ class ReactDOMServerRenderer {
           } else {
             invariant(false, 'ReactDOMServer does not yet support Suspense.');
           }
+        }
+        // eslint-disable-next-line-no-fallthrough
+        case REACT_SCOPE_TYPE: {
+          if (enableScopeAPI) {
+            const nextChildren = toArray(
+              ((nextChild: any): ReactElement).props.children,
+            );
+            const frame: Frame = {
+              type: null,
+              domNamespace: parentNamespace,
+              children: nextChildren,
+              childIndex: 0,
+              context: context,
+              footer: '',
+            };
+            if (__DEV__) {
+              ((frame: any): FrameDev).debugElementStack = [];
+            }
+            this.stack.push(frame);
+            return '';
+          }
+          invariant(
+            false,
+            'ReactDOMServer does not yet support scope components.',
+          );
         }
         // eslint-disable-next-line-no-fallthrough
         default:
@@ -1203,43 +1257,6 @@ class ReactDOMServerRenderer {
             return '';
           }
           // eslint-disable-next-line-no-fallthrough
-          case REACT_FUNDAMENTAL_TYPE: {
-            if (enableFundamentalAPI) {
-              const fundamentalImpl = elementType.impl;
-              const open = fundamentalImpl.getServerSideString(
-                null,
-                nextElement.props,
-              );
-              const getServerSideStringClose =
-                fundamentalImpl.getServerSideStringClose;
-              const close =
-                getServerSideStringClose !== undefined
-                  ? getServerSideStringClose(null, nextElement.props)
-                  : '';
-              const nextChildren =
-                fundamentalImpl.reconcileChildren !== false
-                  ? toArray(((nextChild: any): ReactElement).props.children)
-                  : [];
-              const frame: Frame = {
-                type: null,
-                domNamespace: parentNamespace,
-                children: nextChildren,
-                childIndex: 0,
-                context: context,
-                footer: close,
-              };
-              if (__DEV__) {
-                ((frame: any): FrameDev).debugElementStack = [];
-              }
-              this.stack.push(frame);
-              return open;
-            }
-            invariant(
-              false,
-              'ReactDOMServer does not yet support the fundamental API.',
-            );
-          }
-          // eslint-disable-next-line-no-fallthrough
           case REACT_LAZY_TYPE: {
             const element: ReactElement = (nextChild: any);
             const lazyComponent: LazyComponent<any, any> = (nextChild: any)
@@ -1270,31 +1287,6 @@ class ReactDOMServerRenderer {
             this.stack.push(frame);
             return '';
           }
-          // eslint-disable-next-line-no-fallthrough
-          case REACT_SCOPE_TYPE: {
-            if (enableScopeAPI) {
-              const nextChildren = toArray(
-                ((nextChild: any): ReactElement).props.children,
-              );
-              const frame: Frame = {
-                type: null,
-                domNamespace: parentNamespace,
-                children: nextChildren,
-                childIndex: 0,
-                context: context,
-                footer: '',
-              };
-              if (__DEV__) {
-                ((frame: any): FrameDev).debugElementStack = [];
-              }
-              this.stack.push(frame);
-              return '';
-            }
-            invariant(
-              false,
-              'ReactDOMServer does not yet support scope components.',
-            );
-          }
         }
       }
 
@@ -1312,7 +1304,7 @@ class ReactDOMServerRenderer {
             "it's defined in, or you might have mixed up default and " +
             'named imports.';
         }
-        const ownerName = owner ? getComponentName(owner) : null;
+        const ownerName = owner ? getComponentNameFromType(owner) : null;
         if (ownerName) {
           info += '\n\nCheck the render method of `' + ownerName + '`.';
         }
@@ -1333,18 +1325,21 @@ class ReactDOMServerRenderer {
     context: Object,
     parentNamespace: string,
   ): string {
-    const tag = element.type.toLowerCase();
+    const tag = element.type;
 
     let namespace = parentNamespace;
-    if (parentNamespace === Namespaces.html) {
+    if (parentNamespace === HTML_NAMESPACE) {
       namespace = getIntrinsicNamespace(tag);
     }
 
+    let props = element.props;
+
     if (__DEV__) {
-      if (namespace === Namespaces.html) {
+      if (namespace === HTML_NAMESPACE) {
+        const isCustomComponent = isCustomComponentFn(tag, props);
         // Should this check be gated by parent namespace? Not sure we want to
         // allow <SVG> or <mATH>.
-        if (tag !== element.type) {
+        if (!isCustomComponent && tag.toLowerCase() !== element.type) {
           console.error(
             '<%s /> is using incorrect casing. ' +
               'Use PascalCase for React components, ' +
@@ -1357,7 +1352,6 @@ class ReactDOMServerRenderer {
 
     validateDangerousTag(tag);
 
-    let props = element.props;
     if (tag === 'input') {
       if (__DEV__) {
         checkControlledValueProps('input', props);
@@ -1373,7 +1367,7 @@ class ReactDOMServerRenderer {
               '(specify either the checked prop, or the defaultChecked prop, but not ' +
               'both). Decide between using a controlled or uncontrolled input ' +
               'element and remove one of these props. More info: ' +
-              'https://fb.me/react-controlled-components',
+              'https://reactjs.org/link/controlled-components',
             'A component',
             props.type,
           );
@@ -1390,7 +1384,7 @@ class ReactDOMServerRenderer {
               '(specify either the value prop, or the defaultValue prop, but not ' +
               'both). Decide between using a controlled or uncontrolled input ' +
               'element and remove one of these props. More info: ' +
-              'https://fb.me/react-controlled-components',
+              'https://reactjs.org/link/controlled-components',
             'A component',
             props.type,
           );
@@ -1423,7 +1417,7 @@ class ReactDOMServerRenderer {
               '(specify either the value prop, or the defaultValue prop, but not ' +
               'both). Decide between using a controlled or uncontrolled textarea ' +
               'and remove one of these props. More info: ' +
-              'https://fb.me/react-controlled-components',
+              'https://reactjs.org/link/controlled-components',
           );
           didWarnDefaultTextareaValue = true;
         }
@@ -1445,7 +1439,7 @@ class ReactDOMServerRenderer {
             defaultValue == null,
             'If you supply `defaultValue` on a <textarea>, do not pass children.',
           );
-          if (Array.isArray(textareaChildren)) {
+          if (isArray(textareaChildren)) {
             invariant(
               textareaChildren.length <= 1,
               '<textarea> can only have at most one child.',
@@ -1474,14 +1468,14 @@ class ReactDOMServerRenderer {
           if (props[propName] == null) {
             continue;
           }
-          const isArray = Array.isArray(props[propName]);
-          if (props.multiple && !isArray) {
+          const propNameIsArray = isArray(props[propName]);
+          if (props.multiple && !propNameIsArray) {
             console.error(
               'The `%s` prop supplied to <select> must be an array if ' +
                 '`multiple` is true.',
               propName,
             );
-          } else if (!props.multiple && isArray) {
+          } else if (!props.multiple && propNameIsArray) {
             console.error(
               'The `%s` prop supplied to <select> must be a scalar ' +
                 'value if `multiple` is false.',
@@ -1500,7 +1494,7 @@ class ReactDOMServerRenderer {
               '(specify either the value prop, or the defaultValue prop, but not ' +
               'both). Decide between using a controlled or uncontrolled select ' +
               'element and remove one of these props. More info: ' +
-              'https://fb.me/react-controlled-components',
+              'https://reactjs.org/link/controlled-components',
           );
           didWarnDefaultSelectValue = true;
         }
@@ -1522,7 +1516,7 @@ class ReactDOMServerRenderer {
           value = optionChildren;
         }
         selected = false;
-        if (Array.isArray(selectValue)) {
+        if (isArray(selectValue)) {
           // multiple
           for (let j = 0; j < selectValue.length; j++) {
             if ('' + selectValue[j] === value) {

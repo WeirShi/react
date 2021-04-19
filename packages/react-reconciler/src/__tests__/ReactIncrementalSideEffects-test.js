@@ -38,6 +38,19 @@ describe('ReactIncrementalSideEffects', () => {
     return {text: t, hidden: false};
   }
 
+  // Note: This is based on a similar component we use in www. We can delete
+  // once the extra div wrapper is no longer necessary.
+  function LegacyHiddenDiv({children, mode}) {
+    return (
+      <div hidden={mode === 'hidden'}>
+        <React.unstable_LegacyHidden
+          mode={mode === 'hidden' ? 'unstable-defer-without-hiding' : mode}>
+          {children}
+        </React.unstable_LegacyHidden>
+      </div>
+    );
+  }
+
   it('can update child nodes of a host instance', () => {
     function Bar(props) {
       return <span>{props.text}</span>;
@@ -371,6 +384,7 @@ describe('ReactIncrementalSideEffects', () => {
     expect(ReactNoop.getChildren('portalContainer')).toEqual([]);
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('does not update child nodes if a flush is aborted', () => {
     function Bar(props) {
       Scheduler.unstable_yieldValue('Bar');
@@ -396,7 +410,13 @@ describe('ReactIncrementalSideEffects', () => {
       div(div(span('Hello'), span('Hello')), span('Yo')),
     ]);
 
-    ReactNoop.render(<Foo text="World" />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo text="World" />);
+      });
+    } else {
+      ReactNoop.render(<Foo text="World" />);
+    }
 
     // Flush some of the work without committing
     expect(Scheduler).toFlushAndYieldThrough(['Foo', 'Bar']);
@@ -405,6 +425,7 @@ describe('ReactIncrementalSideEffects', () => {
     ]);
   });
 
+  // @gate experimental
   it('preserves a previously rendered node when deprioritized', () => {
     function Middle(props) {
       Scheduler.unstable_yieldValue('Middle');
@@ -415,9 +436,9 @@ describe('ReactIncrementalSideEffects', () => {
       Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
-          <div hidden={true}>
+          <LegacyHiddenDiv mode="hidden">
             <Middle>{props.text}</Middle>
-          </div>
+          </LegacyHiddenDiv>
         </div>
       );
     }
@@ -455,6 +476,7 @@ describe('ReactIncrementalSideEffects', () => {
     );
   });
 
+  // @gate experimental
   it('can reuse side-effects after being preempted', () => {
     function Bar(props) {
       Scheduler.unstable_yieldValue('Bar');
@@ -471,7 +493,7 @@ describe('ReactIncrementalSideEffects', () => {
     function Foo(props) {
       Scheduler.unstable_yieldValue('Foo');
       return (
-        <div hidden={true}>
+        <LegacyHiddenDiv mode="hidden">
           {props.step === 0 ? (
             <div>
               <Bar>Hi</Bar>
@@ -480,7 +502,7 @@ describe('ReactIncrementalSideEffects', () => {
           ) : (
             middleContent
           )}
-        </div>
+        </LegacyHiddenDiv>
       );
     }
 
@@ -534,6 +556,7 @@ describe('ReactIncrementalSideEffects', () => {
     );
   });
 
+  // @gate experimental
   it('can reuse side-effects after being preempted, if shouldComponentUpdate is false', () => {
     class Bar extends React.Component {
       shouldComponentUpdate(nextProps) {
@@ -563,9 +586,9 @@ describe('ReactIncrementalSideEffects', () => {
     function Foo(props) {
       Scheduler.unstable_yieldValue('Foo');
       return (
-        <div hidden={true}>
+        <LegacyHiddenDiv mode="hidden">
           <Content step={props.step} text={props.text} />
-        </div>
+        </LegacyHiddenDiv>
       );
     }
 
@@ -617,12 +640,19 @@ describe('ReactIncrementalSideEffects', () => {
     );
   });
 
+  // @gate experimental || !enableSyncDefaultUpdates
   it('can update a completed tree before it has a chance to commit', () => {
     function Foo(props) {
       Scheduler.unstable_yieldValue('Foo');
       return <span prop={props.step} />;
     }
-    ReactNoop.render(<Foo step={1} />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo step={1} />);
+      });
+    } else {
+      ReactNoop.render(<Foo step={1} />);
+    }
     // This should be just enough to complete the tree without committing it
     expect(Scheduler).toFlushAndYieldThrough(['Foo']);
     expect(ReactNoop.getChildrenAsJSX()).toEqual(null);
@@ -631,13 +661,26 @@ describe('ReactIncrementalSideEffects', () => {
     ReactNoop.flushNextYield();
     expect(ReactNoop.getChildrenAsJSX()).toEqual(<span prop={1} />);
 
-    ReactNoop.render(<Foo step={2} />);
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo step={2} />);
+      });
+    } else {
+      ReactNoop.render(<Foo step={2} />);
+    }
     // This should be just enough to complete the tree without committing it
     expect(Scheduler).toFlushAndYieldThrough(['Foo']);
     expect(ReactNoop.getChildrenAsJSX()).toEqual(<span prop={1} />);
     // This time, before we commit the tree, we update the root component with
     // new props
-    ReactNoop.render(<Foo step={3} />);
+
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.unstable_startTransition(() => {
+        ReactNoop.render(<Foo step={3} />);
+      });
+    } else {
+      ReactNoop.render(<Foo step={3} />);
+    }
     expect(ReactNoop.getChildrenAsJSX()).toEqual(<span prop={1} />);
     // Now let's commit. We already had a commit that was pending, which will
     // render 2.
@@ -649,12 +692,13 @@ describe('ReactIncrementalSideEffects', () => {
     expect(ReactNoop.getChildrenAsJSX()).toEqual(<span prop={3} />);
   });
 
+  // @gate experimental
   it('updates a child even though the old props is empty', () => {
     function Foo(props) {
       return (
-        <div hidden={true}>
+        <LegacyHiddenDiv mode="hidden">
           <span prop={1} />
-        </div>
+        </LegacyHiddenDiv>
       );
     }
 
@@ -888,6 +932,7 @@ describe('ReactIncrementalSideEffects', () => {
     expect(ops).toEqual(['Bar', 'Baz', 'Bar', 'Bar']);
   });
 
+  // @gate experimental
   it('deprioritizes setStates that happens within a deprioritized tree', () => {
     const barInstances = [];
 
@@ -910,11 +955,11 @@ describe('ReactIncrementalSideEffects', () => {
       return (
         <div>
           <span prop={props.tick} />
-          <div hidden={true}>
+          <LegacyHiddenDiv mode="hidden">
             <Bar idx={props.idx} />
             <Bar idx={props.idx} />
             <Bar idx={props.idx} />
-          </div>
+          </LegacyHiddenDiv>
         </div>
       );
     }

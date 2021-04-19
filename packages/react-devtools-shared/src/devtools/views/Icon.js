@@ -12,16 +12,20 @@ import styles from './Icon.css';
 
 export type IconType =
   | 'arrow'
+  | 'bug'
   | 'code'
   | 'components'
   | 'copy'
+  | 'error'
+  | 'facebook'
   | 'flame-chart'
   | 'interactions'
   | 'profiler'
   | 'ranked-chart'
   | 'search'
   | 'settings'
-  | 'store-as-global-variable';
+  | 'store-as-global-variable'
+  | 'warning';
 
 type Props = {|
   className?: string,
@@ -34,6 +38,9 @@ export default function Icon({className = '', type}: Props) {
     case 'arrow':
       pathData = PATH_ARROW;
       break;
+    case 'bug':
+      pathData = PATH_BUG;
+      break;
     case 'code':
       pathData = PATH_CODE;
       break;
@@ -42,6 +49,12 @@ export default function Icon({className = '', type}: Props) {
       break;
     case 'copy':
       pathData = PATH_COPY;
+      break;
+    case 'error':
+      pathData = PATH_ERROR;
+      break;
+    case 'facebook':
+      pathData = PATH_FACEBOOK;
       break;
     case 'flame-chart':
       pathData = PATH_FLAME_CHART;
@@ -64,6 +77,9 @@ export default function Icon({className = '', type}: Props) {
     case 'store-as-global-variable':
       pathData = PATH_STORE_AS_GLOBAL_VARIABLE;
       break;
+    case 'warning':
+      pathData = PATH_WARNING;
+      break;
     default:
       console.warn(`Unsupported type "${type}" specified for Icon`);
       break;
@@ -84,6 +100,13 @@ export default function Icon({className = '', type}: Props) {
 
 const PATH_ARROW = 'M8 5v14l11-7z';
 
+const PATH_BUG = `
+  M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49
+  0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09
+  1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21
+  5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z
+`;
+
 const PATH_CODE = `
   M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z
   `;
@@ -94,6 +117,12 @@ const PATH_COMPONENTS =
 const PATH_COPY = `
   M3 13h2v-2H3v2zm0 4h2v-2H3v2zm2 4v-2H3a2 2 0 0 0 2 2zM3 9h2V7H3v2zm12 12h2v-2h-2v2zm4-18H9a2 2 0 0 0-2
   2v10a2 2 0 0 0 2 2h10c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 12H9V5h10v10zm-8 6h2v-2h-2v2zm-4 0h2v-2H7v2z
+`;
+
+const PATH_ERROR = `M16.971 0h-9.942l-7.029 7.029v9.941l7.029 7.03h9.941l7.03-7.029v-9.942l-7.029-7.029zm-1.402 16.945l-3.554-3.521-3.518 3.568-1.418-1.418 3.507-3.566-3.586-3.472 1.418-1.417 3.581 3.458 3.539-3.583 1.431 1.431-3.535 3.568 3.566 3.522-1.431 1.43z`;
+
+const PATH_FACEBOOK = `
+  M22,12c0-5.52-4.48-10-10-10S2,6.48,2,12c0,4.84,3.44,8.87,8,9.8V15H8v-3h2V9.5C10,7.57,11.57,6,13.5,6H16v3h-2 c-0.55,0-1,0.45-1,1v2h3v3h-3v6.95C18.05,21.45,22,17.19,22,12z
 `;
 
 const PATH_FLAME_CHART = `
@@ -143,3 +172,5 @@ const PATH_STORE_AS_GLOBAL_VARIABLE = `
   1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6
   8h-4v-2h4v2zm0-4h-4v-2h4v2z
 `;
+
+const PATH_WARNING = `M12 1l-12 22h24l-12-22zm-1 8h2v7h-2v-7zm1 11.25c-.69 0-1.25-.56-1.25-1.25s.56-1.25 1.25-1.25 1.25.56 1.25 1.25-.56 1.25-1.25 1.25z`;
