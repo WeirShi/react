@@ -39,6 +39,7 @@ import {
   enableCache,
   enableSchedulingProfiler,
   enableUpdaterTracking,
+  enableSyncDefaultUpdates,
 } from 'shared/ReactFeatureFlags';
 import {isDevToolsPresent} from './ReactFiberDevToolsHook.new';
 
@@ -270,6 +271,18 @@ export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
     }
   }
 
+  if (
+    // TODO: Check for root override, once that lands
+    enableSyncDefaultUpdates &&
+    (nextLanes & InputContinuousLane) !== NoLanes
+  ) {
+    // When updates are sync by default, we entangle continous priority updates
+    // and default updates, so they render in the same batch. The only reason
+    // they use separate lanes is because continuous updates should interrupt
+    // transitions, but default updates should not.
+    nextLanes |= pendingLanes & DefaultLane;
+  }
+
   // Check for entangled lanes and add them to the batch.
   //
   // A lane is said to be entangled with another when it's not allowed to render
@@ -464,6 +477,19 @@ export function includesOnlyTransitions(lanes: Lanes) {
   return (lanes & TransitionLanes) === lanes;
 }
 
+export function shouldTimeSlice(root: FiberRoot, lanes: Lanes) {
+  if (!enableSyncDefaultUpdates) {
+    return true;
+  }
+  const SyncDefaultLanes =
+    InputContinuousHydrationLane |
+    InputContinuousLane |
+    DefaultHydrationLane |
+    DefaultLane;
+  // TODO: Check for root override, once that lands
+  return (lanes & SyncDefaultLanes) === NoLanes;
+}
+
 export function isTransitionLane(lane: Lane) {
   return (lane & TransitionLanes) !== 0;
 }
@@ -612,12 +638,6 @@ export function markRootExpired(root: FiberRoot, expiredLanes: Lanes) {
   entanglements[SyncLaneIndex] |= expiredLanes;
   root.entangledLanes |= SyncLane;
   root.pendingLanes |= SyncLane;
-}
-
-export function areLanesExpired(root: FiberRoot, lanes: Lanes) {
-  const SyncLaneIndex = 0;
-  const entanglements = root.entanglements;
-  return (entanglements[SyncLaneIndex] & lanes) !== NoLanes;
 }
 
 export function markRootMutableRead(root: FiberRoot, updateLane: Lane) {

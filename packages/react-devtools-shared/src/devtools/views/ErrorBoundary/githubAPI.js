@@ -7,18 +7,18 @@
  * @flow
  */
 
-import {Octokit} from '@octokit/rest';
-
 export type GitHubIssue = {|
   title: string,
   url: string,
 |};
 
+const GITHUB_ISSUES_API = 'https://api.github.com/search/issues';
+
 export async function searchGitHubIssues(
   message: string,
 ): Promise<GitHubIssue | null> {
   // Remove Fiber IDs from error message (as those will be unique).
-  message = message.replace(/"[0-9]+"/, '');
+  message = message.replace(/"[0-9]+"/g, '');
 
   const filters = [
     'in:title',
@@ -29,11 +29,14 @@ export async function searchGitHubIssues(
     'repo:facebook/react',
   ];
 
-  const octokit = new Octokit();
-  const {data} = await octokit.search.issuesAndPullRequests({
-    q: message + ' ' + filters.join(' '),
-  });
-
+  const response = await fetch(
+    GITHUB_ISSUES_API +
+      '?q=' +
+      encodeURIComponent(message) +
+      '%20' +
+      filters.map(encodeURIComponent).join('%20'),
+  );
+  const data = await response.json();
   if (data.items.length > 0) {
     const item = data.items[0];
     return {

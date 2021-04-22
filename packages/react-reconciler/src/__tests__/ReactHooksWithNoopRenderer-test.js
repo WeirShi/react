@@ -876,14 +876,11 @@ describe('ReactHooksWithNoopRenderer', () => {
     // TODO: This should probably warn
     // @gate experimental
     it('calling startTransition inside render phase', async () => {
-      let startTransition;
       function App() {
         const [counter, setCounter] = useState(0);
-        const [_startTransition] = useTransition();
-        startTransition = _startTransition;
 
         if (counter === 0) {
-          startTransition(() => {
+          React.unstable_startTransition(() => {
             setCounter(c => c + 1);
           });
         }
@@ -1408,21 +1405,10 @@ describe('ReactHooksWithNoopRenderer', () => {
         ReactNoop.unstable_runWithPriority(ContinuousEventPriority, () => {
           setParentState(false);
         });
-        if (gate(flags => flags.enableSyncDefaultUpdates)) {
-          expect(Scheduler).toFlushUntilNextPaint([
-            // TODO: why do the children render and fire effects?
-            'Child two render',
-            'Child one commit',
-            'Child two commit',
-            'Parent false render',
-            'Parent false commit',
-          ]);
-        } else {
-          expect(Scheduler).toFlushUntilNextPaint([
-            'Parent false render',
-            'Parent false commit',
-          ]);
-        }
+        expect(Scheduler).toFlushUntilNextPaint([
+          'Parent false render',
+          'Parent false commit',
+        ]);
 
         // Schedule updates for children too (which should be ignored)
         setChildStates.forEach(setChildState => setChildState(2));
@@ -3227,9 +3213,7 @@ describe('ReactHooksWithNoopRenderer', () => {
       let transition;
       function App() {
         const [show, setShow] = useState(false);
-        const [startTransition, isPending] = useTransition({
-          timeoutMs: 1000,
-        });
+        const [isPending, startTransition] = useTransition();
         transition = () => {
           startTransition(() => {
             setShow(true);

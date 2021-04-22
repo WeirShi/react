@@ -32,7 +32,6 @@ import {
   disableSchedulerTimeoutInWorkLoop,
   enableStrictEffects,
   skipUnmountedBoundaries,
-  enableSyncDefaultUpdates,
   enableUpdaterTracking,
 } from 'shared/ReactFeatureFlags';
 import ReactSharedInternals from 'shared/ReactSharedInternals';
@@ -50,8 +49,10 @@ import {
   IdlePriority as IdleSchedulerPriority,
 } from './Scheduler';
 import {
-  flushSyncCallbackQueue,
+  flushSyncCallbacks,
+  flushSyncCallbacksOnlyInLegacyMode,
   scheduleSyncCallback,
+  scheduleLegacySyncCallback,
 } from './ReactFiberSyncTaskQueue.old';
 import {
   NoFlags as NoHookEffect,
@@ -139,10 +140,6 @@ import {
   NoLanes,
   NoLane,
   SyncLane,
-  DefaultLane,
-  DefaultHydrationLane,
-  InputContinuousLane,
-  InputContinuousHydrationLane,
   NoTimestamp,
   claimNextTransitionLane,
   claimNextRetryLane,
@@ -154,6 +151,7 @@ import {
   includesNonIdleWork,
   includesOnlyRetries,
   includesOnlyTransitions,
+  shouldTimeSlice,
   getNextLanes,
   markStarvedLanesAsExpired,
   getLanesToRetrySynchronouslyOnError,
@@ -163,7 +161,6 @@ import {
   markRootPinged,
   markRootExpired,
   markRootFinished,
-  areLanesExpired,
   getHighestPriorityLane,
   addFiberToLanesMap,
   movePendingFibersToMemoized,
@@ -438,13 +435,6 @@ export function requestUpdateLane(fiber: Fiber): Lane {
   // TODO: Move this type conversion to the event priority module.
   const updateLane: Lane = (getCurrentUpdatePriority(): any);
   if (updateLane !== NoLane) {
-    if (
-      enableSyncDefaultUpdates &&
-      (updateLane === InputContinuousLane ||
-        updateLane === InputContinuousHydrationLane)
-    ) {
-      return DefaultLane;
-    }
     return updateLane;
   }
 
@@ -455,13 +445,6 @@ export function requestUpdateLane(fiber: Fiber): Lane {
   // use that directly.
   // TODO: Move this type conversion to the event priority module.
   const eventLane: Lane = (getCurrentEventPriority(): any);
-  if (
-    enableSyncDefaultUpdates &&
-    (eventLane === InputContinuousLane ||
-      eventLane === InputContinuousHydrationLane)
-  ) {
-    return DefaultLane;
-  }
   return eventLane;
 }
 
@@ -580,7 +563,7 @@ export function scheduleUpdateOnFiber(
         // without immediately flushing it. We only do this for user-initiated
         // updates, to preserve historical behavior of legacy mode.
         resetRenderTimer();
-        flushSyncCallbackQueue();
+        flushSyncCallbacksOnlyInLegacyMode();
       }
     }
   } else {
@@ -714,25 +697,20 @@ function ensureRootIsScheduled(root: FiberRoot, currentTime: number) {
 
   // Schedule a new callback.
   let newCallbackNode;
-  if (
-    enableSyncDefaultUpdates &&
-    (newCallbackPriority === DefaultLane ||
-      newCallbackPriority === DefaultHydrationLane)
-  ) {
-    newCallbackNode = scheduleCallback(
-      ImmediateSchedulerPriority,
-      performSyncWorkOnRoot.bind(null, root),
-    );
-  } else if (newCallbackPriority === SyncLane) {
+  if (newCallbackPriority === SyncLane) {
     // Special case: Sync React callbacks are scheduled on a special
     // internal queue
-    scheduleSyncCallback(performSyncWorkOnRoot.bind(null, root));
+    if (root.tag === LegacyRoot) {
+      scheduleLegacySyncCallback(performSyncWorkOnRoot.bind(null, root));
+    } else {
+      scheduleSyncCallback(performSyncWorkOnRoot.bind(null, root));
+    }
     if (supportsMicrotasks) {
       // Flush the queue in a microtask.
-      scheduleMicrotask(flushSyncCallbackQueue);
+      scheduleMicrotask(flushSyncCallbacks);
     } else {
       // Flush the queue in an Immediate task.
-      scheduleCallback(ImmediateSchedulerPriority, flushSyncCallbackQueue);
+      scheduleCallback(ImmediateSchedulerPriority, flushSyncCallbacks);
     }
     newCallbackNode = null;
   } else {
@@ -821,7 +799,10 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
     return null;
   }
 
-  let exitStatus = renderRootConcurrent(root, lanes);
+  let exitStatus = shouldTimeSlice(root, lanes)
+    ? renderRootConcurrent(root, lanes)
+    : // Time slicing is disabled for default updates in this root.
+      renderRootSync(root, lanes);
   if (exitStatus !== RootIncomplete) {
     if (exitStatus === RootErrored) {
       executionContext |= RetryAfterError;
@@ -840,9 +821,10 @@ function performConcurrentWorkOnRoot(root, didTimeout) {
       // synchronously to block concurrent data mutations, and we'll includes
       // all pending updates are included. If it still fails after the second
       // attempt, we'll give up and commit the resulting tree.
-      lanes = getLanesToRetrySynchronouslyOnError(root);
-      if (lanes !== NoLanes) {
-        exitStatus = renderRootSync(root, lanes);
+      const errorRetryLanes = getLanesToRetrySynchronouslyOnError(root);
+      if (errorRetryLanes !== NoLanes) {
+        lanes = errorRetryLanes;
+        exitStatus = renderRootSync(root, errorRetryLanes);
       }
     }
 
@@ -1007,21 +989,23 @@ function performSyncWorkOnRoot(root) {
 
   flushPassiveEffects();
 
-  let lanes;
-  let exitStatus;
-  if (
-    root === workInProgressRoot &&
-    areLanesExpired(root, workInProgressRootRenderLanes)
-  ) {
-    // There's a partial tree, and at least one of its lanes has expired. Finish
-    // rendering it before rendering the rest of the expired work.
-    lanes = workInProgressRootRenderLanes;
-    exitStatus = renderRootSync(root, lanes);
+  let lanes = getNextLanes(root, NoLanes);
+  if (includesSomeLane(lanes, SyncLane)) {
+    if (
+      root === workInProgressRoot &&
+      includesSomeLane(lanes, workInProgressRootRenderLanes)
+    ) {
+      // There's a partial tree, and at least one of its lanes has expired. Finish
+      // rendering it before rendering the rest of the expired work.
+      lanes = workInProgressRootRenderLanes;
+    }
   } else {
-    lanes = getNextLanes(root, NoLanes);
-    exitStatus = renderRootSync(root, lanes);
+    // There's no remaining sync work left.
+    ensureRootIsScheduled(root, now());
+    return null;
   }
 
+  let exitStatus = renderRootSync(root, lanes);
   if (root.tag !== LegacyRoot && exitStatus === RootErrored) {
     executionContext |= RetryAfterError;
 
@@ -1039,8 +1023,9 @@ function performSyncWorkOnRoot(root) {
     // synchronously to block concurrent data mutations, and we'll includes
     // all pending updates are included. If it still fails after the second
     // attempt, we'll give up and commit the resulting tree.
-    lanes = getLanesToRetrySynchronouslyOnError(root);
-    if (lanes !== NoLanes) {
+    const errorRetryLanes = getLanesToRetrySynchronouslyOnError(root);
+    if (errorRetryLanes !== NoLanes) {
+      lanes = errorRetryLanes;
       exitStatus = renderRootSync(root, lanes);
     }
   }
@@ -1058,11 +1043,7 @@ function performSyncWorkOnRoot(root) {
   const finishedWork: Fiber = (root.current.alternate: any);
   root.finishedWork = finishedWork;
   root.finishedLanes = lanes;
-  if (enableSyncDefaultUpdates && !includesSomeLane(lanes, SyncLane)) {
-    finishConcurrentRender(root, exitStatus, lanes);
-  } else {
-    commitRoot(root);
-  }
+  commitRoot(root);
 
   // Before exiting, make sure there's a callback scheduled for the next
   // pending level.
@@ -1079,7 +1060,7 @@ export function flushRoot(root: FiberRoot, lanes: Lanes) {
     ensureRootIsScheduled(root, now());
     if ((executionContext & (RenderContext | CommitContext)) === NoContext) {
       resetRenderTimer();
-      flushSyncCallbackQueue();
+      flushSyncCallbacks();
     }
   }
 }
@@ -1110,7 +1091,7 @@ export function flushDiscreteUpdates() {
     // like `el.focus()`. Exit.
     return;
   }
-  flushSyncCallbackQueue();
+  flushSyncCallbacks();
   // If the discrete updates scheduled passive effects, flush them now so that
   // they fire before the next serial event.
   flushPassiveEffects();
@@ -1136,10 +1117,11 @@ export function batchedUpdates<A, R>(fn: A => R, a: A): R {
     return fn(a);
   } finally {
     executionContext = prevExecutionContext;
+    // If there were legacy sync updates, flush them at the end of the outer
+    // most batchedUpdates-like method.
     if (executionContext === NoContext) {
-      // Flush the immediate callbacks that were scheduled during this batch
       resetRenderTimer();
-      flushSyncCallbackQueue();
+      flushSyncCallbacksOnlyInLegacyMode();
     }
   }
 }
@@ -1151,10 +1133,11 @@ export function batchedEventUpdates<A, R>(fn: A => R, a: A): R {
     return fn(a);
   } finally {
     executionContext = prevExecutionContext;
+    // If there were legacy sync updates, flush them at the end of the outer
+    // most batchedUpdates-like method.
     if (executionContext === NoContext) {
-      // Flush the immediate callbacks that were scheduled during this batch
       resetRenderTimer();
-      flushSyncCallbackQueue();
+      flushSyncCallbacksOnlyInLegacyMode();
     }
   }
 }
@@ -1176,9 +1159,10 @@ export function discreteUpdates<A, B, C, D, R>(
     setCurrentUpdatePriority(previousPriority);
     ReactCurrentBatchConfig.transition = prevTransition;
     if (executionContext === NoContext) {
-      // Flush the immediate callbacks that were scheduled during this batch
       resetRenderTimer();
-      flushSyncCallbackQueue();
+      // TODO: This should only flush legacy sync updates. Not discrete updates
+      // in Concurrent Mode. Discrete updates will flush in a microtask.
+      flushSyncCallbacks();
     }
   }
 }
@@ -1191,10 +1175,13 @@ export function unbatchedUpdates<A, R>(fn: (a: A) => R, a: A): R {
     return fn(a);
   } finally {
     executionContext = prevExecutionContext;
+    // If there were legacy sync updates, flush them at the end of the outer
+    // most batchedUpdates-like method.
     if (executionContext === NoContext) {
-      // Flush the immediate callbacks that were scheduled during this batch
       resetRenderTimer();
-      flushSyncCallbackQueue();
+      // TODO: I think this call is redundant, because we flush inside
+      // scheduleUpdateOnFiber when LegacyUnbatchedContext is set.
+      flushSyncCallbacksOnlyInLegacyMode();
     }
   }
 }
@@ -1221,7 +1208,7 @@ export function flushSync<A, R>(fn: A => R, a: A): R {
     // Note that this will happen even if batchedUpdates is higher up
     // the stack.
     if ((executionContext & (RenderContext | CommitContext)) === NoContext) {
-      flushSyncCallbackQueue();
+      flushSyncCallbacks();
     } else {
       if (__DEV__) {
         console.error(
@@ -1251,7 +1238,7 @@ export function flushControlled(fn: () => mixed): void {
     if (executionContext === NoContext) {
       // Flush the immediate callbacks that were scheduled during this batch
       resetRenderTimer();
-      flushSyncCallbackQueue();
+      flushSyncCallbacks();
     }
   }
 }
@@ -1826,6 +1813,15 @@ function commitRootImpl(root, renderPriorityLevel) {
     }
 
     return null;
+  } else {
+    if (__DEV__) {
+      if (lanes === NoLanes) {
+        console.error(
+          'root.finishedLanes should not be empty during a commit. This is a ' +
+            'bug in React.',
+        );
+      }
+    }
   }
   root.finishedWork = null;
   root.finishedLanes = NoLanes;
@@ -2114,7 +2110,7 @@ function commitRootImpl(root, renderPriorityLevel) {
   }
 
   // If layout work was scheduled, flush it now.
-  flushSyncCallbackQueue();
+  flushSyncCallbacks();
 
   if (__DEV__) {
     if (enableDebugTracing) {
@@ -2240,7 +2236,7 @@ function flushPassiveEffectsImpl() {
 
   executionContext = prevExecutionContext;
 
-  flushSyncCallbackQueue();
+  flushSyncCallbacks();
 
   // If additional passive effects were scheduled, increment a counter. If this
   // exceeds the limit, we'll fire a warning.
