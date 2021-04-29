@@ -51,9 +51,6 @@ export const enableProfilerNestedUpdatePhase = false;
 // This callback accepts the component type (class instance or function) the update is scheduled for.
 export const enableProfilerNestedUpdateScheduledHook = false;
 
-// Trace which interactions trigger each commit.
-export const enableSchedulerTracing = __PROFILE__;
-
 // Track which Fiber(s) schedule render work.
 export const enableUpdaterTracking = __PROFILE__;
 
@@ -172,3 +169,5 @@ export const disableSchedulerTimeoutInWorkLoop = false;
 export const enableLazyContextPropagation = false;
 
 export const enableSyncDefaultUpdates = true;
+
+export const allowConcurrentByDefault = false;

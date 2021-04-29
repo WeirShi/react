@@ -25,9 +25,7 @@ import type {Wakeable} from 'shared/ReactTypes';
 import type {OffscreenState} from './ReactFiberOffscreenComponent';
 import type {HookFlags} from './ReactHookEffectTags';
 
-import {unstable_wrap as Schedule_tracing_wrap} from 'scheduler/tracing';
 import {
-  enableSchedulerTracing,
   enableProfilerTimer,
   enableProfilerCommitHooks,
   enableProfilerNestedUpdatePhase,
@@ -641,17 +639,7 @@ export function commitPassiveEffectDurations(
           }
 
           if (typeof onPostCommit === 'function') {
-            if (enableSchedulerTracing) {
-              onPostCommit(
-                id,
-                phase,
-                passiveEffectDuration,
-                commitTime,
-                finishedRoot.memoizedInteractions,
-              );
-            } else {
-              onPostCommit(id, phase, passiveEffectDuration, commitTime);
-            }
+            onPostCommit(id, phase, passiveEffectDuration, commitTime);
           }
 
           // Bubble times to the next nearest ancestor Profiler.
@@ -919,46 +907,24 @@ function commitLayoutEffectOnFiber(
           }
 
           if (typeof onRender === 'function') {
-            if (enableSchedulerTracing) {
-              onRender(
-                finishedWork.memoizedProps.id,
-                phase,
-                finishedWork.actualDuration,
-                finishedWork.treeBaseDuration,
-                finishedWork.actualStartTime,
-                commitTime,
-                finishedRoot.memoizedInteractions,
-              );
-            } else {
-              onRender(
-                finishedWork.memoizedProps.id,
-                phase,
-                finishedWork.actualDuration,
-                finishedWork.treeBaseDuration,
-                finishedWork.actualStartTime,
-                commitTime,
-              );
-            }
+            onRender(
+              finishedWork.memoizedProps.id,
+              phase,
+              finishedWork.actualDuration,
+              finishedWork.treeBaseDuration,
+              finishedWork.actualStartTime,
+              commitTime,
+            );
           }
 
           if (enableProfilerCommitHooks) {
             if (typeof onCommit === 'function') {
-              if (enableSchedulerTracing) {
-                onCommit(
-                  finishedWork.memoizedProps.id,
-                  phase,
-                  effectDuration,
-                  commitTime,
-                  finishedRoot.memoizedInteractions,
-                );
-              } else {
-                onCommit(
-                  finishedWork.memoizedProps.id,
-                  phase,
-                  effectDuration,
-                  commitTime,
-                );
-              }
+              onCommit(
+                finishedWork.memoizedProps.id,
+                phase,
+                effectDuration,
+                commitTime,
+              );
             }
 
             // Schedule a passive effect for this Profiler to call onPostCommit hooks.
@@ -1416,18 +1382,6 @@ function detachFiberAfterEffects(fiber: Fiber) {
     fiber.deletions = null;
     fiber.sibling = null;
 
-    // The `stateNode` is cyclical because on host nodes it points to the host
-    // tree, which has its own pointers to children, parents, and siblings.
-    // The other host nodes also point back to fibers, so we should detach that
-    // one, too.
-    if (fiber.tag === HostComponent) {
-      const hostInstance: Instance = fiber.stateNode;
-      if (hostInstance !== null) {
-        detachDeletedInstance(hostInstance);
-      }
-    }
-    fiber.stateNode = null;
-
     // I'm intentionally not clearing the `return` field in this level. We
     // already disconnect the `return` pointer at the root of the deleted
     // subtree (in `detachFiberMutation`). Besides, `return` by itself is not
@@ -1446,6 +1400,15 @@ function detachFiberAfterEffects(fiber: Fiber) {
       // The purpose of this branch is to be super aggressive so we can measure
       // if there's any difference in memory impact. If there is, that could
       // indicate a React leak we don't know about.
+
+      // For host components, disconnect host instance -> fiber pointer.
+      if (fiber.tag === HostComponent) {
+        const hostInstance: Instance = fiber.stateNode;
+        if (hostInstance !== null) {
+          detachDeletedInstance(hostInstance);
+        }
+      }
+
       fiber.return = null;
       fiber.dependencies = null;
       fiber.memoizedProps = null;
@@ -2105,13 +2068,8 @@ function attachSuspenseRetryListeners(finishedWork: Fiber) {
     }
     wakeables.forEach(wakeable => {
       // Memoize using the boundary fiber to prevent redundant listeners.
-      let retry = resolveRetryWakeable.bind(null, finishedWork, wakeable);
+      const retry = resolveRetryWakeable.bind(null, finishedWork, wakeable);
       if (!retryCache.has(wakeable)) {
-        if (enableSchedulerTracing) {
-          if (wakeable.__reactDoNotTraceInteractions !== true) {
-            retry = Schedule_tracing_wrap(retry);
-          }
-        }
         retryCache.add(wakeable);
 
         if (enableUpdaterTracking) {

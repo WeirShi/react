@@ -39,9 +39,32 @@ import {
   enableCache,
   enableSchedulingProfiler,
   enableUpdaterTracking,
-  enableSyncDefaultUpdates,
+  allowConcurrentByDefault,
 } from 'shared/ReactFeatureFlags';
 import {isDevToolsPresent} from './ReactFiberDevToolsHook.new';
+import {ConcurrentUpdatesByDefaultMode, NoMode} from './ReactTypeOfMode';
+
+export const SyncLanePriority: LanePriority = 12;
+
+const InputContinuousHydrationLanePriority: LanePriority = 11;
+export const InputContinuousLanePriority: LanePriority = 10;
+
+const DefaultHydrationLanePriority: LanePriority = 9;
+export const DefaultLanePriority: LanePriority = 8;
+
+const TransitionHydrationPriority: LanePriority = 7;
+export const TransitionPriority: LanePriority = 6;
+
+const RetryLanePriority: LanePriority = 5;
+
+const SelectiveHydrationLanePriority: LanePriority = 4;
+
+const IdleHydrationLanePriority: LanePriority = 3;
+export const IdleLanePriority: LanePriority = 2;
+
+const OffscreenLanePriority: LanePriority = 1;
+
+export const NoLanePriority: LanePriority = 0;
 
 // Lane values below should be kept in sync with getLabelsForLanes(), used by react-devtools-scheduling-profiler.
 // If those values are changed that package should be rebuilt and redeployed.
@@ -146,19 +169,29 @@ export const NoTimestamp = -1;
 let nextTransitionLane: Lane = TransitionLane1;
 let nextRetryLane: Lane = RetryLane1;
 
+// "Registers" used to "return" multiple values
+// Used by getHighestPriorityLanes and getNextLanes:
+let return_highestLanePriority: LanePriority = DefaultLanePriority;
+
 function getHighestPriorityLanes(lanes: Lanes | Lane): Lanes {
   switch (getHighestPriorityLane(lanes)) {
     case SyncLane:
+      return_highestLanePriority = SyncLanePriority;
       return SyncLane;
     case InputContinuousHydrationLane:
+      return_highestLanePriority = InputContinuousHydrationLanePriority;
       return InputContinuousHydrationLane;
     case InputContinuousLane:
+      return_highestLanePriority = InputContinuousLanePriority;
       return InputContinuousLane;
     case DefaultHydrationLane:
+      return_highestLanePriority = DefaultHydrationLanePriority;
       return DefaultHydrationLane;
     case DefaultLane:
+      return_highestLanePriority = DefaultLanePriority;
       return DefaultLane;
     case TransitionHydrationLane:
+      return_highestLanePriority = TransitionHydrationPriority;
       return TransitionHydrationLane;
     case TransitionLane1:
     case TransitionLane2:
@@ -176,20 +209,26 @@ function getHighestPriorityLanes(lanes: Lanes | Lane): Lanes {
     case TransitionLane14:
     case TransitionLane15:
     case TransitionLane16:
+      return_highestLanePriority = TransitionPriority;
       return lanes & TransitionLanes;
     case RetryLane1:
     case RetryLane2:
     case RetryLane3:
     case RetryLane4:
     case RetryLane5:
+      return_highestLanePriority = RetryLanePriority;
       return lanes & RetryLanes;
     case SelectiveHydrationLane:
+      return_highestLanePriority = SelectiveHydrationLanePriority;
       return SelectiveHydrationLane;
     case IdleHydrationLane:
+      return_highestLanePriority = IdleHydrationLanePriority;
       return IdleHydrationLane;
     case IdleLane:
+      return_highestLanePriority = IdleLanePriority;
       return IdleLane;
     case OffscreenLane:
+      return_highestLanePriority = OffscreenLanePriority;
       return OffscreenLane;
     default:
       if (__DEV__) {
@@ -198,6 +237,7 @@ function getHighestPriorityLanes(lanes: Lanes | Lane): Lanes {
         );
       }
       // This shouldn't be reachable, but as a fallback, return the entire bitmask.
+      return_highestLanePriority = DefaultLanePriority;
       return lanes;
   }
 }
@@ -206,10 +246,12 @@ export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
   // Early bailout if there's no pending work left.
   const pendingLanes = root.pendingLanes;
   if (pendingLanes === NoLanes) {
+    return_highestLanePriority = NoLanePriority;
     return NoLanes;
   }
 
   let nextLanes = NoLanes;
+  let nextLanePriority = NoLanePriority;
 
   const suspendedLanes = root.suspendedLanes;
   const pingedLanes = root.pingedLanes;
@@ -221,10 +263,12 @@ export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
     const nonIdleUnblockedLanes = nonIdlePendingLanes & ~suspendedLanes;
     if (nonIdleUnblockedLanes !== NoLanes) {
       nextLanes = getHighestPriorityLanes(nonIdleUnblockedLanes);
+      nextLanePriority = return_highestLanePriority;
     } else {
       const nonIdlePingedLanes = nonIdlePendingLanes & pingedLanes;
       if (nonIdlePingedLanes !== NoLanes) {
         nextLanes = getHighestPriorityLanes(nonIdlePingedLanes);
+        nextLanePriority = return_highestLanePriority;
       }
     }
   } else {
@@ -232,9 +276,11 @@ export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
     const unblockedLanes = pendingLanes & ~suspendedLanes;
     if (unblockedLanes !== NoLanes) {
       nextLanes = getHighestPriorityLanes(unblockedLanes);
+      nextLanePriority = return_highestLanePriority;
     } else {
       if (pingedLanes !== NoLanes) {
         nextLanes = getHighestPriorityLanes(pingedLanes);
+        nextLanePriority = return_highestLanePriority;
       }
     }
   }
@@ -255,28 +301,30 @@ export function getNextLanes(root: FiberRoot, wipLanes: Lanes): Lanes {
     // bother waiting until the root is complete.
     (wipLanes & suspendedLanes) === NoLanes
   ) {
-    const nextLane = getHighestPriorityLane(nextLanes);
-    const wipLane = getHighestPriorityLane(wipLanes);
+    getHighestPriorityLanes(wipLanes);
+    const wipLanePriority = return_highestLanePriority;
     if (
-      // Tests whether the next lane is equal or lower priority than the wip
-      // one. This works because the bits decrease in priority as you go left.
-      nextLane >= wipLane ||
+      nextLanePriority <= wipLanePriority ||
       // Default priority updates should not interrupt transition updates. The
       // only difference between default updates and transition updates is that
       // default updates do not support refresh transitions.
-      (nextLane === DefaultLane && (wipLane & TransitionLanes) !== NoLanes)
+      (nextLanePriority === DefaultLanePriority &&
+        wipLanePriority === TransitionPriority)
     ) {
       // Keep working on the existing in-progress tree. Do not interrupt.
       return wipLanes;
+    } else {
+      return_highestLanePriority = nextLanePriority;
     }
   }
 
   if (
-    // TODO: Check for root override, once that lands
-    enableSyncDefaultUpdates &&
-    (nextLanes & InputContinuousLane) !== NoLanes
+    allowConcurrentByDefault &&
+    (root.current.mode & ConcurrentUpdatesByDefaultMode) !== NoMode
   ) {
-    // When updates are sync by default, we entangle continous priority updates
+    // Do nothing, use the lanes as they were assigned.
+  } else if ((nextLanes & InputContinuousLane) !== NoLanes) {
+    // When updates are sync by default, we entangle continuous priority updates
     // and default updates, so they render in the same batch. The only reason
     // they use separate lanes is because continuous updates should interrupt
     // transitions, but default updates should not.
@@ -420,7 +468,6 @@ export function markStarvedLanesAsExpired(
   // expiration time. If so, we'll assume the update is being starved and mark
   // it as expired to force it to finish.
   let lanes = pendingLanes;
-  let expiredLanes = 0;
   while (lanes > 0) {
     const index = pickArbitraryLaneIndex(lanes);
     const lane = 1 << index;
@@ -439,14 +486,10 @@ export function markStarvedLanesAsExpired(
       }
     } else if (expirationTime <= currentTime) {
       // This lane expired
-      expiredLanes |= lane;
+      root.expiredLanes |= lane;
     }
 
     lanes &= ~lane;
-  }
-
-  if (expiredLanes !== 0) {
-    markRootExpired(root, expiredLanes);
   }
 }
 
@@ -467,6 +510,9 @@ export function getLanesToRetrySynchronouslyOnError(root: FiberRoot): Lanes {
   return NoLanes;
 }
 
+export function returnNextLanesPriority() {
+  return return_highestLanePriority;
+}
 export function includesNonIdleWork(lanes: Lanes) {
   return (lanes & NonIdleLanes) !== NoLanes;
 }
@@ -478,15 +524,25 @@ export function includesOnlyTransitions(lanes: Lanes) {
 }
 
 export function shouldTimeSlice(root: FiberRoot, lanes: Lanes) {
-  if (!enableSyncDefaultUpdates) {
+  if ((lanes & root.expiredLanes) !== NoLanes) {
+    // At least one of these lanes expired. To prevent additional starvation,
+    // finish rendering without yielding execution.
+    return false;
+  }
+
+  if (
+    allowConcurrentByDefault &&
+    (root.current.mode & ConcurrentUpdatesByDefaultMode) !== NoMode
+  ) {
+    // Concurrent updates by default always use time slicing.
     return true;
   }
+
   const SyncDefaultLanes =
     InputContinuousHydrationLane |
     InputContinuousLane |
     DefaultHydrationLane |
     DefaultLane;
-  // TODO: Check for root override, once that lands
   return (lanes & SyncDefaultLanes) === NoLanes;
 }
 
@@ -566,6 +622,13 @@ export function higherPriorityLane(a: Lane, b: Lane) {
   return a !== NoLane && a < b ? a : b;
 }
 
+export function higherLanePriority(
+  a: LanePriority,
+  b: LanePriority,
+): LanePriority {
+  return a !== NoLanePriority && a > b ? a : b;
+}
+
 export function createLaneMap<T>(initial: T): LaneMap<T> {
   // Intentionally pushing one by one.
   // https://v8.dev/blog/elements-kinds#avoid-creating-holes
@@ -632,14 +695,6 @@ export function markRootPinged(
   root.pingedLanes |= root.suspendedLanes & pingedLanes;
 }
 
-export function markRootExpired(root: FiberRoot, expiredLanes: Lanes) {
-  const entanglements = root.entanglements;
-  const SyncLaneIndex = 0;
-  entanglements[SyncLaneIndex] |= expiredLanes;
-  root.entangledLanes |= SyncLane;
-  root.pendingLanes |= SyncLane;
-}
-
 export function markRootMutableRead(root: FiberRoot, updateLane: Lane) {
   root.mutableReadLanes |= updateLane & root.pendingLanes;
 }
@@ -653,6 +708,7 @@ export function markRootFinished(root: FiberRoot, remainingLanes: Lanes) {
   root.suspendedLanes = 0;
   root.pingedLanes = 0;
 
+  root.expiredLanes &= remainingLanes;
   root.mutableReadLanes &= remainingLanes;
 
   root.entangledLanes &= remainingLanes;

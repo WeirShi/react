@@ -55,7 +55,6 @@ export const enableSchedulingProfiler =
 // Note: we'll want to remove this when we to userland implementation.
 // For now, we'll turn it on for everyone because it's *already* on for everyone in practice.
 // At least this will let us stop shipping <Profiler> implementation to all users.
-export const enableSchedulerTracing = true;
 export const enableSchedulerDebugging = true;
 
 export const warnAboutDeprecatedLifecycles = true;
@@ -93,6 +92,8 @@ export const warnUnstableRenderSubtreeIntoContainer = false;
 export const enableNewReconciler = __VARIANT__;
 
 export const enableRecursiveCommitTraversal = false;
+
+export const allowConcurrentByDefault = true;
 
 // Flow magic to verify the exports of this file match the original version.
 // eslint-disable-next-line no-unused-vars
