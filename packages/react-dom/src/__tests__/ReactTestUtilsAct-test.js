@@ -97,10 +97,18 @@ describe('ReactTestUtils.act()', () => {
     });
 
     // @gate experimental
-    it('warns in concurrent mode', () => {
+    it('does not warn in concurrent mode', () => {
+      const root = ReactDOM.unstable_createRoot(document.createElement('div'));
+      root.render(<App />);
+      Scheduler.unstable_flushAll();
+    });
+
+    // @gate experimental
+    it('warns in concurrent mode if root is strict', () => {
       expect(() => {
         const root = ReactDOM.unstable_createRoot(
           document.createElement('div'),
+          {unstable_strictMode: true},
         );
         root.render(<App />);
         Scheduler.unstable_flushAll();

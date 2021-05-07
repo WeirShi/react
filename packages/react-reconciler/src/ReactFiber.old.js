@@ -422,27 +422,20 @@ export function resetWorkInProgress(workInProgress: Fiber, renderLanes: Lanes) {
 
 export function createHostRootFiber(
   tag: RootTag,
-  strictModeLevelOverride: null | number,
+  isStrictMode: boolean,
   concurrentUpdatesByDefaultOverride: null | boolean,
 ): Fiber {
   let mode;
   if (tag === ConcurrentRoot) {
     mode = ConcurrentMode;
-    if (strictModeLevelOverride !== null) {
-      if (strictModeLevelOverride >= 1) {
-        mode |= StrictLegacyMode;
-      }
+    if (isStrictMode === true) {
+      mode |= StrictLegacyMode;
+
       if (enableStrictEffects) {
-        if (strictModeLevelOverride >= 2) {
-          mode |= StrictEffectsMode;
-        }
+        mode |= StrictEffectsMode;
       }
-    } else {
-      if (enableStrictEffects && createRootStrictEffectsByDefault) {
-        mode |= StrictLegacyMode | StrictEffectsMode;
-      } else {
-        mode |= StrictLegacyMode;
-      }
+    } else if (enableStrictEffects && createRootStrictEffectsByDefault) {
+      mode |= StrictLegacyMode | StrictEffectsMode;
     }
     if (
       // We only use this flag for our repo tests to check both behaviors.
@@ -501,21 +494,7 @@ export function createFiberFromTypeAndProps(
         break;
       case REACT_STRICT_MODE_TYPE:
         fiberTag = Mode;
-
-        // Legacy strict mode (<StrictMode> without any level prop) defaults to level 1.
-        const level =
-          pendingProps.unstable_level == null ? 1 : pendingProps.unstable_level;
-
-        // Levels cascade; higher levels inherit all lower level modes.
-        // It is explicitly not supported to lower a mode with nesting, only to increase it.
-        if (level >= 1) {
-          mode |= StrictLegacyMode;
-        }
-        if (enableStrictEffects) {
-          if (level >= 2) {
-            mode |= StrictEffectsMode;
-          }
-        }
+        mode |= StrictLegacyMode | StrictEffectsMode;
         break;
       case REACT_PROFILER_TYPE:
         return createFiberFromProfiler(pendingProps, mode, lanes, key);

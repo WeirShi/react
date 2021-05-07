@@ -563,6 +563,7 @@ let didWarnDefaultChecked = false;
 let didWarnDefaultSelectValue = false;
 let didWarnDefaultTextareaValue = false;
 let didWarnInvalidOptionChildren = false;
+let didWarnInvalidOptionInnerHTML = false;
 let didWarnSelectedSetOnOption = false;
 
 function checkSelectProp(props, propName) {
@@ -667,7 +668,8 @@ function flattenOptionChildren(children: mixed): string {
       ) {
         didWarnInvalidOptionChildren = true;
         console.error(
-          'Only strings and numbers are supported as <option> children.',
+          'Cannot infer the option value of complex children. ' +
+            'Pass a `value` prop or use a plain string as children to <option>.',
         );
       }
     }
@@ -691,6 +693,7 @@ function pushStartOption(
   let children = null;
   let value = null;
   let selected = null;
+  let innerHTML = null;
   for (const propKey in props) {
     if (hasOwnProperty.call(props, propKey)) {
       const propValue = props[propKey];
@@ -716,10 +719,8 @@ function pushStartOption(
           }
           break;
         case 'dangerouslySetInnerHTML':
-          invariant(
-            false,
-            '`dangerouslySetInnerHTML` does not work on <option>.',
-          );
+          innerHTML = propValue;
+          break;
         // eslint-disable-next-line-no-fallthrough
         case 'value':
           value = propValue;
@@ -737,7 +738,18 @@ function pushStartOption(
     if (value !== null) {
       stringValue = '' + value;
     } else {
-      stringValue = children = flattenOptionChildren(children);
+      if (__DEV__) {
+        if (innerHTML !== null) {
+          if (!didWarnInvalidOptionInnerHTML) {
+            didWarnInvalidOptionInnerHTML = true;
+            console.error(
+              'Pass a `value` prop if you set dangerouslyInnerHTML so React knows ' +
+                'which value should be selected.',
+            );
+          }
+        }
+      }
+      stringValue = flattenOptionChildren(children);
     }
     if (isArray(selectedValue)) {
       // multiple
@@ -760,6 +772,7 @@ function pushStartOption(
   }
 
   target.push(endOfStartTag);
+  pushInnerHTML(target, innerHTML, children);
   return children;
 }
 
