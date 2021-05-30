@@ -9,6 +9,28 @@
   <!-- Upcoming changes go here -->
 </details>
 
+## 4.13.5 (May 25, 2021)
+#### Bugfix
+* Handle edge case where a component mounts before its "owner" (in DEV mode) that previously caused a validation error ([bvaughn](https://github.com/bvaughn) in [#21562](https://github.com/facebook/react/pull/21562))
+
+## 4.13.4 (May 20, 2021)
+#### Bugfix
+* Fix edge-case Fast Refresh bug that caused Fibers with warnings/errors to be untracked prematurely (which broke componentinspection in DevTools) ([bvaughn](https://github.com/bvaughn) in [#21536](https://github.com/facebook/react/pull/21536))
+* Revert force deep re-mount when Fast Refresh detected (was no longer necessary) ([bvaughn](https://github.com/bvaughn) in [#21539](https://github.com/facebook/react/pull/21539))
+
+## 4.13.3 (May 19, 2021)
+#### Misc
+* Updated `react` and `react-dom` API imports in preparation for upcoming stable release ([bvaughn](https://github.com/bvaughn) in [#21488](https://github.com/facebook/react/pull/21488))
+
+#### Bugfix
+* Reload all roots after Fast Refresh force-remount (to avoid corrupted Store state) ([bvaughn](https://github.com/bvaughn) in [#21516](https://github.com/facebook/react/pull/21516) and [#21523](https://github.com/facebook/react/pull/21523))
+* Errors thrown by Store can be dismissed so DevTools remain usable in many cases ([bvaughn](https://github.com/bvaughn) in [#21520](https://github.com/facebook/react/pull/21520))
+* Bugfix for `useState()` object with `hasOwnProperty` key ([bvaughn](https://github.com/bvaughn) in [#21524](https://github.com/facebook/react/pull/21524))
+* Fixed string concatenation problem when a `Symbol` was logged to `console.error` or `console.warn` ([bvaughn](https://github.com/bvaughn) in [#21521](https://github.com/facebook/react/pull/21521))
+* DevTools: Fixed version range NPM syntax
+ ([bvaughn](https://github.com/bvaughn) in [9cf1069](https://github.com/facebook/react/commit/9cf1069ffc5f3835506e314ef8c2e80bbfa8bdca#diff))
+* Tweaked DevTools error template title to match issue form template ([bvaughn](https://github.com/bvaughn) in [1a2d792](https://github.com/facebook/react/commit/1a2d7925035531e5767ff31ff8d0d581b5f94d49))
+
 ## 4.13.2 (May 7, 2021)
 #### Misc
 * Improved bug report template to use new [GitHub issue forms](https://gh-community.github.io/issue-template-feedback/structured/) ([bvaughn](https://github.com/bvaughn) in [#21450](https://github.com/facebook/react/pull/21450))
@@ -110,6 +132,10 @@ The following features are only enabled when used with (experimental) builds of 
 
 ###### Show which hooks (indices) changed when profiling
 ![Show which hooks (indices) changed when profiling](https://user-images.githubusercontent.com/29597/114225838-d37be180-9940-11eb-93f8-93e0115421c8.png)
+
+## 4.10.4 (May 20, 2021)
+#### Bugfix
+* Ported passive effects sync flushing/bubbling bugfix ([bvaughn](https://github.com/bvaughn) in [#21540](https://github.com/facebook/react/pull/21540))
 
 ## 4.10.3 (April 27, 2021)
 #### Bugfix
